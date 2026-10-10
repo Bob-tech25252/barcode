@@ -1,0 +1,318 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barcode Scanner</title>
+
+  <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Arial, sans-serif;
+      background: #101827;
+      color: white;
+      text-align: center;
+    }
+
+    .container {
+      max-width: 650px;
+      margin: 0 auto;
+      padding: 24px;
+      background: #1d293b;
+      border-radius: 18px;
+    }
+
+    h1 {
+      margin-top: 0;
+    }
+
+    p {
+      color: #cbd5e1;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      max-height: 400px;
+      object-fit: cover;
+      background: #000;
+      border-radius: 12px;
+      margin: 18px 0;
+    }
+
+    button {
+      padding: 13px 18px;
+      margin: 5px;
+      border: 0;
+      border-radius: 9px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #startButton {
+      background: #22c55e;
+      color: #07140a;
+    }
+
+    #stopButton {
+      background: #ef4444;
+      color: white;
+    }
+
+    #copyButton {
+      background: #3b82f6;
+      color: white;
+    }
+
+    #status {
+      padding: 12px;
+      background: #0f172a;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    #result {
+      min-height: 50px;
+      padding: 14px;
+      margin: 12px 0;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+      font-size: 18px;
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      text-align: left;
+    }
+
+    select {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+
+    .history {
+      text-align: left;
+      padding-left: 22px;
+      overflow-wrap: anywhere;
+    }
+
+    .history li {
+      margin: 8px 0;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <h1>📷 Barcode Scanner</h1>
+    <p>Start your camera and point it at a barcode.</p>
+
+    <label for="cameraSelect">Choose camera</label>
+    <select id="cameraSelect">
+      <option value="">Default camera</option>
+    </select>
+
+    <video id="video" muted playsinline></video>
+
+    <button id="startButton">Start Scanner</button>
+    <button id="stopButton">Stop Scanner</button>
+
+    <h2>Scan Result</h2>
+    <div id="result">No barcode scanned yet.</div>
+    <p id="status">Scanner is stopped.</p>
+
+    <button id="copyButton">Copy Result</button>
+
+    <h2>Scan History</h2>
+    <ul id="history" class="history"></ul>
+    <button id="clearButton">Clear History</button>
+  </main>
+
+  <script>
+    const video = document.getElementById("video");
+    const cameraSelect = document.getElementById("cameraSelect");
+    const resultBox = document.getElementById("result");
+    const statusBox = document.getElementById("status");
+    const historyList = document.getElementById("history");
+
+    let reader = null;
+    let controls = null;
+    let lastResult = "";
+    let lastScanTime = 0;
+    let scanning = false;
+
+    function setStatus(message) {
+      statusBox.textContent = message;
+    }
+
+    function addHistory(text) {
+      const item = document.createElement("li");
+      item.textContent =
+        new Date().toLocaleTimeString() + " — " + text;
+      historyList.prepend(item);
+    }
+
+    async function loadCameras() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera access requires HTTPS or localhost.");
+        }
+
+        const devices =
+          await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+
+        const previousValue = cameraSelect.value;
+        cameraSelect.replaceChildren();
+
+        if (devices.length === 0) {
+          cameraSelect.add(new Option("No cameras found", ""));
+          return;
+        }
+
+        devices.forEach((device, index) => {
+          const label = device.label || `Camera ${index + 1}`;
+          cameraSelect.add(new Option(label, device.deviceId));
+        });
+
+        if (devices.some(d => d.deviceId === previousValue)) {
+          cameraSelect.value = previousValue;
+        } else {
+          const rearCamera = devices.find(d =>
+            /back|rear|environment/i.test(d.label)
+          );
+
+          if (rearCamera) {
+            cameraSelect.value = rearCamera.deviceId;
+          } else {
+            cameraSelect.selectedIndex = 0;
+          }
+        }
+      } catch (error) {
+        setStatus("Could not list cameras: " + error.message);
+      }
+    }
+
+    async function startScanner() {
+      if (scanning) {
+        await stopScanner();
+      }
+
+      try {
+        if (typeof ZXingBrowser === "undefined") {
+          throw new Error("Scanner library failed to load. Check your internet connection.");
+        }
+
+        scanning = true;
+        setStatus("Starting camera…");
+
+        reader = new ZXingBrowser.BrowserMultiFormatReader();
+
+        const selectedCamera = cameraSelect.value || undefined;
+
+        controls = await reader.decodeFromVideoDevice(
+          selectedCamera,
+          video,
+          (scan, error) => {
+            if (scan) {
+              const text = scan.getText();
+              const now = Date.now();
+
+              // Avoid adding the same barcode repeatedly.
+              if (text !== lastResult || now - lastScanTime > 2000) {
+                lastResult = text;
+                lastScanTime = now;
+                resultBox.textContent = text;
+                setStatus("Barcode scanned successfully!");
+                addHistory(text);
+            }
+          }
+          }
+        );
+
+        setStatus("Camera is running. Point it at a barcode.");
+      } catch (error) {
+        scanning = false;
+        setStatus("Could not start camera: " + error.message);
+      }
+    }
+
+    async function stopScanner() {
+      scanning = false;
+
+      if (controls) {
+        controls.stop();
+        controls = null;
+      }
+
+      if (reader) {
+        reader = null;
+      }
+
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+      }
+
+      video.removeAttribute("src");
+      video.load();
+
+      setStatus("Scanner is stopped.");
+    }
+
+    document.getElementById("startButton").addEventListener(
+      "click", startScanner
+    );
+
+    document.getElementById("stopButton").addEventListener(
+      "click", stopScanner
+    );
+
+    document.getElementById("copyButton").addEventListener(
+      "click", async () => {
+        const text = resultBox.textContent;
+
+        if (!text || text === "No barcode scanned yet.") {
+          setStatus("There is no barcode result to copy.");
+          return;
+        }
+
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus("Barcode result copied!");
+        } catch (error) {
+          setStatus("Copy failed. Select the result and copy it manually.");
+        }
+      }
+    );
+
+    document.getElementById("clearButton").addEventListener(
+      "click", () => {
+        historyList.replaceChildren();
+        setStatus("Scan history cleared.");
+      }
+    );
+
+    cameraSelect.addEventListener("change", () => {
+      if (scanning) {
+        startScanner();
+      }
+    });
+
+    loadCameras();
+  </script>
+</body>
+</html>
